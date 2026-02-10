@@ -5,15 +5,78 @@
 bundle:
   name: databricks-data-ops
 
+# Artifact configuration - builds and deploys the data_ops library wheel
+artifacts:
+  default:
+    type: whl
+    build: uv build
+    path: ./dist/data_ops-*.whl
+
+# Sync configuration - include domain pipelines, notebooks, and resources
+# Note: domains/ is NOT packaged in the wheel, it's synced directly to workspace
+sync:
+  include:
+    - domains/**/*.py
+    - notebooks/**/*.py
+    - dlt/**/*.py
+    - resources/**/*.yml
+
+# Variables used across all targets
+variables:
+  catalog:
+    description: Unity Catalog name for the environment
+  ua_schema:
+    description: UA (User Acceptance/landing zone) schema name
+    default: ua
+  bronze_schema:
+    description: Bronze layer schema name
+    default: bronze
+  bronze_external_schema:
+    description: Bronze external schema for landing raw data files
+    default: bronze.external
+  silver_schema:
+    description: Silver layer schema name
+    default: silver
+  gold_schema:
+    description: Gold layer schema name
+    default: gold
+  gold_wheels_table:
+    description: Table for tracking deployed wheel files
+    default: ${var.catalog}.gold.wheels
+  library_path:
+    description: Path to the deployed data_ops library wheel in DBFS
+    default: /Workspace/.bundle/${bundle.name}/${bundle.target}/dist/data_ops-*.whl
+
+# TODO: Add resources section with jobs and pipelines
+# resources:
+#   jobs:
+#     member_ingestion:
+#       name: member_ingestion_job
+#       # ... job configuration
+#   pipelines:
+#     member_pipeline:
+#       name: member_dlt_pipeline
+#       # ... pipeline configuration
+
 targets:
   dev:
     mode: development
     default: true
     workspace:
       host: https://dbc-39d9ee99-6bcf.cloud.databricks.com
+    variables:
+      catalog: dev
 
-  ## Optionally, there could be 'staging' or 'prod' targets here.
-  #
-  # prod:
-  #   workspace:
-  #     host: https://dbc-39d9ee99-6bcf.cloud.databricks.com
+  sit:
+    mode: production
+    workspace:
+      host: https://dbc-39d9ee99-6bcf.cloud.databricks.com
+    variables:
+      catalog: sit
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-39d9ee99-6bcf.cloud.databricks.com
+    variables:
+      catalog: prod

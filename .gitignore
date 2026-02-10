@@ -5,3 +5,8 @@
 typings/
 __pycache__/
 *.pyc
+CLAUDE.md
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
