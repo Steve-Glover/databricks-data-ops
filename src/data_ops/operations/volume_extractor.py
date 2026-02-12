@@ -73,7 +73,7 @@ class VolumeExtractor:
 
     Args:
         config: Extraction configuration
-        spark: Optional SparkSession (follows DatabricksLogger resolution pattern)
+        spark: Optional SparkSession. If None, gets or creates the active session.
     """
 
     def __init__(
@@ -83,19 +83,12 @@ class VolumeExtractor:
     ):
         self.config = config
 
-        # Spark session resolution: injected > active session > new DatabricksSession
         self.spark: SparkSession
         if spark is None:
-            try:
-                from databricks.connect import DatabricksSession
-
-                active_session = SparkSession.getActiveSession()
-                if active_session is None:
-                    self.spark = DatabricksSession.builder.getOrCreate()
-                else:
-                    self.spark = active_session
-            except Exception as e:
-                raise RuntimeError(f"Failed to obtain SparkSession: {e}") from e
+            active = SparkSession.getActiveSession()
+            if active is None:
+                raise RuntimeError("No active SparkSession found. Pass a SparkSession explicitly.")
+            self.spark = active
         else:
             self.spark = spark
 

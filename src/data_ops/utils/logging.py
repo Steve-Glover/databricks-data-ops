@@ -10,7 +10,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from databricks.connect import DatabricksSession
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import StringType, StructField, StructType, TimestampType
 
@@ -27,7 +26,7 @@ class DatabricksLogger:
         domain: Data domain being processed
         process: The process being executed (e.g., ingestion, bronze, silver, gold)
         log_table_path: Path to the Delta table where logs are stored
-        spark: SparkSession instance (DatabricksSession)
+        spark: SparkSession instance
     """
 
     # Schema for the log Delta table
@@ -60,7 +59,7 @@ class DatabricksLogger:
                     'gold', 'ml-preprocessing', 'eda')
             log_table_path: Path to the Delta table for logs
                            (e.g., 'catalog.schema.logs' or 'dbfs:/path/to/logs')
-            spark: SparkSession instance (DatabricksSession). If None, will get or create.
+            spark: SparkSession instance. If None, will get or create.
 
         Raises:
             ValueError: If domain or process are empty strings
@@ -73,18 +72,11 @@ class DatabricksLogger:
         self.process = process
         self.log_table_path = log_table_path
 
-        # Get or create DatabricksSession (subclass of SparkSession)
         if spark is None:
-            try:
-                # Try to get active session first
-                active_session = SparkSession.getActiveSession()
-                if active_session is None:
-                    # Create new DatabricksSession
-                    self.spark: SparkSession = DatabricksSession.builder.getOrCreate()
-                else:
-                    self.spark: SparkSession = active_session
-            except Exception as e:
-                raise RuntimeError(f"Failed to obtain SparkSession: {e}") from e
+            active = SparkSession.getActiveSession()
+            if active is None:
+                raise RuntimeError("No active SparkSession found. Pass a SparkSession explicitly.")
+            self.spark: SparkSession = active
         else:
             self.spark: SparkSession = spark
 
@@ -394,7 +386,7 @@ def create_logger(
         domain: Data domain being processed
         process: Process being executed
         log_table_path: Path to the Delta table for logs
-        spark: Optional SparkSession instance (can be DatabricksSession)
+        spark: Optional SparkSession instance
 
     Returns:
         Configured DatabricksLogger instance

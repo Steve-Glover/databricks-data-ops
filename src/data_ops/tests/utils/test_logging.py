@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-from databricks.connect import DatabricksSession
+from pyspark.sql import SparkSession
 from pyspark.sql.types import Row
 
 from data_ops.utils.logging import DatabricksLogger, LogStatus, create_logger
@@ -326,15 +326,7 @@ class TestDatabricksLoggerIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cluster_id = os.getenv("DATABRICKS_CLUSTER_ID")
-        serverless_id = os.getenv("DATABRICKS_SERVERLESS_COMPUTE_ID")
-        builder = DatabricksSession.builder
-        if cluster_id:
-            builder = builder.clusterId(cluster_id)
-        elif not serverless_id:
-            builder = builder.serverless(True)
-        cls.spark = builder.getOrCreate()
-
+        cls.spark = SparkSession.builder.getOrCreate()
         cls.test_table_path = "dev.bronze.test_logging"
 
     @classmethod
