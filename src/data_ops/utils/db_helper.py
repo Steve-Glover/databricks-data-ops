@@ -1,56 +1,85 @@
-from databricks.connect import DatabricksSession
-from pyspark.dbutils import DBUtils
+"""Databricks environment utilities for interacting with the workspace.
 
-# from pyspark.sql import SparkSession
-
-""" 
-db_helper.utils.py provides a collection of utilities to enable
-python modules and scripts to interact with the databricks enviornment 
+Provides helpers for Spark session access, catalog discovery, DBUtils,
+and notebook execution with retry logic.
 """
 
-spark = DatabricksSession.builder.getOrCreate()
+from pyspark.dbutils import DBUtils
+from pyspark.sql import SparkSession
 
-def get_spark():
-    return DatabricksSession.builder.getOrCreate()
 
-def get_catalog(match_str:str)->str:
-    """
-    returns the first catelog name that matches the search string in the databricks workspace
+def get_spark() -> SparkSession:
+    """Get or create the active Spark session.
 
-    Args:
-        match_str (str): Substring to match catalog names against.
+    On Databricks, this returns the existing cluster session.
+    For local development, use DatabricksSession.builder.getOrCreate() directly.
 
     Returns:
-        list: first string of the  catalog names containing the match_str.
+        Active SparkSession instance.
+    """
+    return SparkSession.builder.getOrCreate()
+
+
+def get_catalog(spark: SparkSession, match_str: str) -> str:
+    """Return the first catalog name containing match_str.
+
+    Args:
+        spark: Active Spark session.
+        match_str: Substring to match catalog names against.
+
+    Returns:
+        First catalog name containing match_str.
+
+    Raises:
+        IndexError: If no catalog matches match_str.
     """
     catalogs_df = spark.sql("SHOW CATALOGS")
-    catalog_names = [row.catalog for row in catalogs_df.collect() if match_str in row.catalog]
-    return catalog_names[0]
+    matches = [row.catalog for row in catalogs_df.collect() if match_str in row.catalog]
+    return matches[0]
 
 
-def get_dbutils():
-    """init dbutils in python scripts"""
-    dbutils = DBUtils(spark)      
-    return dbutils
+def get_dbutils(spark: SparkSession) -> DBUtils:
+    """Get DBUtils for interacting with the Databricks file system and secrets.
 
+    Args:
+        spark: Active Spark session.
 
-def run_with_retry(notebook, timeout, args={}, max_retries=3):
-    """ Run databricks notebook. Unpon timeout or exception attempt to 
-        execute max_retries times.
+    Returns:
+        DBUtils instance.
     """
-    dbutils = get_dbutils()
+    return DBUtils(spark)
+
+
+def run_with_retry(
+    spark: SparkSession,
+    notebook: str,
+    timeout: int,
+    args: dict | None = None,
+    max_retries: int = 3,
+) -> str:
+    """Run a Databricks notebook with automatic retry on failure.
+
+    Args:
+        spark: Active Spark session.
+        notebook: Path to the notebook to run.
+        timeout: Timeout in seconds.
+        args: Arguments to pass to the notebook. Defaults to empty dict.
+        max_retries: Maximum number of retry attempts before re-raising.
+
+    Returns:
+        Notebook exit value.
+
+    Raises:
+        Exception: Re-raises the last exception after max_retries exhausted.
+    """
+    dbutils = get_dbutils(spark)
+    args = args or {}
     num_retries = 0
     while True:
         try:
             return dbutils.notebook.run(notebook, timeout, args)
         except Exception as e:
             if num_retries >= max_retries:
-                raise e
-            else:
-                print("Retrying error", e)
-                num_retries += 1
-
-dbutils = get_dbutils()
-
-if __name__ == "__main__":
-    print(get_catalog("cda_ds"))
+                raise
+            print(f"Retrying error: {e}")
+            num_retries += 1
