@@ -58,10 +58,10 @@ class VolumeExtractionConfig(BaseModel, frozen=True):
         return f"{self.catalog}.{self.bronze_schema}.{table_name}"
 
 
-# Regex to extract table name from data filenames (no extension):
-# e.g. "customers_202401_202403" -> table="customers"
-# Dates are YYYYMM format.
-_FILE_PATTERN = re.compile(r"^(.+?)_(\d{6})_(\d{6})$")
+# Chunked files: "customers_202401_202403" -> table="customers"
+_CHUNKED_PATTERN = re.compile(r"^(.+?)_(\d{6})_(\d{6})$")
+# Non-chunked files: filename IS the table name (no extension, no date suffix)
+_NON_CHUNKED_PATTERN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)$")
 
 
 class VolumeExtractor:
@@ -98,8 +98,10 @@ class VolumeExtractor:
     def discover_tables(self) -> dict[str, list[str]]:
         """Discover data files in the source volume and group by table name.
 
-        Files follow the naming convention: tablename_YYYYMM_YYYYMM (no extension).
-        Files ending in .meta are excluded.
+        Files follow one of two naming conventions (no extension):
+        - Chunked: tablename_YYYYMM_YYYYMM (e.g., customers_202401_202403)
+        - Non-chunked: tablename (e.g., customers)
+        Files with extensions (.meta, etc.) are excluded.
 
         Returns:
             Dict mapping table name to list of file paths.
@@ -112,13 +114,21 @@ class VolumeExtractor:
 
         for file_info in files:
             name = file_info.name
-            # Skip .meta files
-            if name.endswith(".meta"):
+            # Skip files with extensions (.meta, etc.)
+            if "." in name:
                 continue
-            match = _FILE_PATTERN.match(name)
+            # Try chunked pattern first (has date range suffix)
+            match = _CHUNKED_PATTERN.match(name)
             if match:
                 table_name = match.group(1)
-                tables.setdefault(table_name, []).append(file_info.path)
+            else:
+                # Non-chunked: entire filename is the table name
+                match = _NON_CHUNKED_PATTERN.match(name)
+                if match:
+                    table_name = match.group(1)
+                else:
+                    continue
+            tables.setdefault(table_name, []).append(file_info.path)
 
         if not tables:
             self.logger.failure(

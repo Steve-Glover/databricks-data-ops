@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 from data_ops.operations.volume_extractor import (
     VolumeExtractionConfig,
     VolumeExtractor,
-    _FILE_PATTERN,
+    _CHUNKED_PATTERN,
+    _NON_CHUNKED_PATTERN,
 )
 from data_ops.utils.errors import DataValidationError
 
@@ -72,23 +73,36 @@ class TestVolumeExtractionConfig(unittest.TestCase):
             cfg.catalog = "prod"
 
 
-class TestFilePattern(unittest.TestCase):
+class TestFilePatterns(unittest.TestCase):
 
-    def test_matches_and_extractions(self):
+    def test_chunked_pattern(self):
         cases = [
-            ("customers_202401_202403", "customers"),
-            ("order_items_202401_202403", "order_items"),
+            ("customers_202401_202403", "customers", "202401", "202403"),
+            ("order_items_202401_202403", "order_items", "202401", "202403"),
         ]
-        for filename, expected_table in cases:
+        for filename, expected_table, start, end in cases:
             with self.subTest(filename=filename):
-                m = _FILE_PATTERN.match(filename)
+                m = _CHUNKED_PATTERN.match(filename)
                 self.assertIsNotNone(m)
                 self.assertEqual(m.group(1), expected_table)
+                self.assertEqual(m.group(2), start)
+                self.assertEqual(m.group(3), end)
 
-    def test_non_matches(self):
-        for name in ["customers.meta", "customers_20240101_20240131", "README.md"]:
+    def test_non_chunked_pattern(self):
+        for name, expected in [("customers", "customers"), ("order_items", "order_items")]:
             with self.subTest(name=name):
-                self.assertIsNone(_FILE_PATTERN.match(name))
+                m = _NON_CHUNKED_PATTERN.match(name)
+                self.assertIsNotNone(m)
+                self.assertEqual(m.group(1), expected)
+
+    def test_chunked_rejects_invalid_dates(self):
+        # 8-digit dates should not match chunked pattern
+        self.assertIsNone(_CHUNKED_PATTERN.match("customers_20240101_20240131"))
+
+    def test_non_chunked_rejects_extensions(self):
+        for name in ["customers.meta", "README.md"]:
+            with self.subTest(name=name):
+                self.assertIsNone(_NON_CHUNKED_PATTERN.match(name))
 
 
 class TestDiscoverTables(unittest.TestCase):
@@ -96,7 +110,7 @@ class TestDiscoverTables(unittest.TestCase):
     def setUp(self):
         self.ext = _make_extractor()
 
-    def test_groups_files_and_skips_meta(self):
+    def test_groups_chunked_files_and_skips_meta(self):
         self.ext.dbutils.fs.ls.return_value = [
             SimpleNamespace(name="customers_202401_202403", path="p1"),
             SimpleNamespace(name="customers_202404_202406", path="p2"),
@@ -106,6 +120,29 @@ class TestDiscoverTables(unittest.TestCase):
         tables = self.ext.discover_tables()
         self.assertEqual(len(tables["customers"]), 2)
         self.assertEqual(len(tables["orders"]), 1)
+
+    def test_groups_non_chunked_files(self):
+        self.ext.dbutils.fs.ls.return_value = [
+            SimpleNamespace(name="eligibility", path="p1"),
+            SimpleNamespace(name="eligibility.meta", path="ignored"),
+        ]
+        tables = self.ext.discover_tables()
+        self.assertEqual(tables, {"eligibility": ["p1"]})
+
+    def test_mixed_chunked_and_non_chunked(self):
+        self.ext.dbutils.fs.ls.return_value = [
+            SimpleNamespace(name="member_202401_202403", path="p1"),
+            SimpleNamespace(name="member_202404_202406", path="p2"),
+            SimpleNamespace(name="claims_202401_202403", path="p3"),
+            SimpleNamespace(name="eligibility", path="p4"),
+            SimpleNamespace(name="member.meta", path="ignored"),
+            SimpleNamespace(name="claims.meta", path="ignored"),
+            SimpleNamespace(name="eligibility.meta", path="ignored"),
+        ]
+        tables = self.ext.discover_tables()
+        self.assertEqual(len(tables["member"]), 2)
+        self.assertEqual(len(tables["claims"]), 1)
+        self.assertEqual(len(tables["eligibility"]), 1)
 
     def test_empty_or_meta_only_raises(self):
         for files in [[], [SimpleNamespace(name="x.meta", path="p")]]:
