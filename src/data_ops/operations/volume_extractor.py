@@ -73,24 +73,16 @@ class VolumeExtractor:
 
     Args:
         config: Extraction configuration
-        spark: Optional SparkSession. If None, gets or creates the active session.
+        spark: SparkSession instance to use for all Spark operations.
     """
 
     def __init__(
         self,
         config: VolumeExtractionConfig,
-        spark: SparkSession | None = None,
+        spark: SparkSession,
     ):
         self.config = config
-
-        self.spark: SparkSession
-        if spark is None:
-            active = SparkSession.getActiveSession()
-            if active is None:
-                raise RuntimeError("No active SparkSession found. Pass a SparkSession explicitly.")
-            self.spark = active
-        else:
-            self.spark = spark
+        self.spark = spark
 
         self.logger = DatabricksLogger(
             domain="volume_extraction",
