@@ -72,13 +72,14 @@ class DatabricksLogger:
         self.process = process
         self.log_table_path = log_table_path
 
+        self.spark: SparkSession
         if spark is None:
             active = SparkSession.getActiveSession()
             if active is None:
                 raise RuntimeError("No active SparkSession found. Pass a SparkSession explicitly.")
-            self.spark: SparkSession = active
+            self.spark = active
         else:
-            self.spark: SparkSession = spark
+            self.spark = spark
 
         # Auto-detect user at initialization
         self._user = self._detect_user()
@@ -92,28 +93,17 @@ class DatabricksLogger:
         Returns:
             User identifier (Databricks user email, username, or system user)
         """
-        # Try to get Databricks user from Spark configuration
         try:
-            user = self.spark.conf.get("spark.databricks.workspaceUrl", None)
-            if user:
-                # Try to get actual user email/name
-                try:
-                    user = self.spark.sql("SELECT current_user()").collect()[0][0]
-                    return user
-                except Exception:
-                    pass
+            return self.spark.sql("SELECT current_user()").collect()[0][0]
         except Exception:
             pass
 
-        # Fallback to environment variables
-        user = (
+        return (
             os.environ.get("DATABRICKS_USER")
             or os.environ.get("USER")
             or os.environ.get("USERNAME")
             or "unknown_user"
         )
-
-        return user
     
     def _detect_source(self) -> str:
         """Auto-detect the source file making the logger call.
@@ -284,29 +274,14 @@ class DatabricksLogger:
         Args:
             log_df: DataFrame containing log entry
         """
-        try:
-            # Check if table exists
-            table_exists = self.spark.catalog.tableExists(self.log_table_path)
+        table_exists = self.spark.catalog.tableExists(self.log_table_path)
 
-            if table_exists:
-                # Append to existing table
-                log_df.write.format("delta").mode("append").saveAsTable(self.log_table_path)
-            else:
-                # Create new table
-                log_df.write.format("delta").mode("overwrite").option(
-                    "overwriteSchema", "true"
-                ).saveAsTable(self.log_table_path)
-
-        except Exception as e:
-            # Fallback: try writing to path instead of table name
-            # This handles cases where catalog/schema might not be accessible
-            try:
-                log_df.write.format("delta").mode("append").save(self.log_table_path)
-            except Exception as fallback_error:
-                raise RuntimeError(
-                    f"Failed to write to Delta table '{self.log_table_path}': {e}. "
-                    f"Fallback also failed: {fallback_error}"
-                ) from e
+        if table_exists:
+            log_df.write.format("delta").mode("append").saveAsTable(self.log_table_path)
+        else:
+            log_df.write.format("delta").mode("overwrite").option(
+                "overwriteSchema", "true"
+            ).saveAsTable(self.log_table_path)
 
     def success(self, step: str, message: str, source_override: Optional[str] = None) -> None:
         """Log a successful operation.

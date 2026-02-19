@@ -1,0 +1,36 @@
+resources:
+  jobs:
+    member_bronze_ingestion:
+      name: "[${bundle.target}] Member Bronze Ingestion"
+      description: >
+        Extracts parquet data from the member landing volume, validates
+        against meta files, writes to bronze Delta tables, and archives.
+
+      tasks:
+        - task_key: bronze_extract
+          environment_key: default
+          spark_python_task:
+            python_file: /Workspace/${workspace.root_path}/files/domains/member/pipelines/bronze.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ${var.library_path}
+
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: "UTC"
+        pause_status: PAUSED
+
+      tags:
+        domain: member
+        layer: bronze
+        pipeline: ingestion
+
+      queue:
+        enabled: true

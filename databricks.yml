@@ -5,12 +5,9 @@
 bundle:
   name: databricks-data-ops
 
-# Artifact configuration - builds and deploys the data_ops library wheel
-artifacts:
-  default:
-    type: whl
-    build: uv build
-    path: ./dist/data_ops-*.whl
+include:
+  - resources/*.yml
+  - resources/**/*.yml
 
 # Sync configuration - include domain pipelines, notebooks, and resources
 # Note: domains/ is NOT packaged in the wheel, it's synced directly to workspace
@@ -44,19 +41,8 @@ variables:
     description: Table for tracking deployed wheel files
     default: ${var.catalog}.gold.wheels
   library_path:
-    description: Path to the deployed data_ops library wheel in DBFS
-    default: /Workspace/.bundle/${bundle.name}/${bundle.target}/dist/data_ops-*.whl
-
-# TODO: Add resources section with jobs and pipelines
-# resources:
-#   jobs:
-#     member_ingestion:
-#       name: member_ingestion_job
-#       # ... job configuration
-#   pipelines:
-#     member_pipeline:
-#       name: member_dlt_pipeline
-#       # ... pipeline configuration
+    description: Path to the deployed data_ops library wheel in the Unity Catalog volume
+    default: /Volumes/${var.catalog}/gold/wheels/data_ops-*.whl
 
 targets:
   dev:
