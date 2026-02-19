@@ -73,7 +73,6 @@ class TestDatabricksLoggerAutoDetection(unittest.TestCase):
         mock_result = MagicMock()
         mock_result.collect.return_value = [Row(current_user="test_user@example.com")]
         self.mock_spark.sql.return_value = mock_result
-        self.mock_spark.conf.get.return_value = "workspace_url"
 
         logger = DatabricksLogger(
             domain="test", process="test", log_table_path=self.log_table_path, spark=self.mock_spark
@@ -81,7 +80,6 @@ class TestDatabricksLoggerAutoDetection(unittest.TestCase):
         self.assertEqual(logger._user, "test_user@example.com")
 
     def test_user_detection_from_environment_fallback(self):
-        self.mock_spark.conf.get.return_value = None
         self.mock_spark.sql.side_effect = Exception("No SQL support")
 
         with patch.dict(os.environ, {"USER": "test_user"}):

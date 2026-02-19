@@ -1,0 +1,11 @@
+artifacts:
+  data_ops:
+    type: whl
+    build: uv build
+    path: ./dist/data_ops-*.whl
+
+resources:
+  files:
+    data_ops_wheel:
+      source: dist/
+      path: /Volumes/${var.catalog}/gold/wheels/
