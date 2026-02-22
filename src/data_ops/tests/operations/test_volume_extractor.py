@@ -247,19 +247,33 @@ class TestArchiveFiles(unittest.TestCase):
             ext.archive_files("t", ["/Volumes/dev/bronze/external/mft/t_202401_202403"])
 
 
-class TestExtractAll(unittest.TestCase):
+class TestExtract(unittest.TestCase):
 
-    def test_continues_on_failure(self):
-        ext = _make_extractor()
-        ext.dbutils.fs.ls.return_value = [
+    def setUp(self):
+        self.ext = _make_extractor()
+        self.ext.dbutils.fs.ls.return_value = [
             SimpleNamespace(name="a_202401_202403", path="p1"),
             SimpleNamespace(name="b_202401_202403", path="p2"),
         ]
-        ext.extract_table = MagicMock(side_effect=[RuntimeError("fail"), None])
 
-        results = ext.extract_all()
+    def test_continues_on_failure(self):
+        self.ext.extract_table = MagicMock(side_effect=[RuntimeError("fail"), None])
+        results = self.ext.extract(["a", "b"])
         self.assertIn("fail", results["a"])
         self.assertEqual(results["b"], "success")
+
+    def test_table_not_found_recorded_as_failure(self):
+        self.ext.extract_table = MagicMock()
+        results = self.ext.extract(["a", "missing"])
+        self.assertEqual(results["a"], "success")
+        self.assertIn("missing", results["missing"])
+
+    def test_only_requested_tables_processed(self):
+        self.ext.extract_table = MagicMock()
+        self.ext.extract(["a"])
+        self.ext.extract_table.assert_called_once()
+        call_args = self.ext.extract_table.call_args
+        self.assertEqual(call_args[0][0], "a")
 
 
 if __name__ == "__main__":

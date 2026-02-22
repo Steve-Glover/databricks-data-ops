@@ -403,32 +403,43 @@ class VolumeExtractor:
             message=f"Completed extraction for '{table_name}'",
         )
 
-    def extract_all(self) -> dict[str, str]:
-        """Top-level entry point: discover and extract all tables.
+    def extract(self, tables: list[str]) -> dict[str, str]:
+        """Extract the specified tables from the source volume.
 
-        Continues processing remaining tables if one fails.
+        Discovers available files then processes only the requested tables.
+        Continues processing remaining tables if one fails. Tables not found
+        in the source volume are recorded as failures.
+
+        Args:
+            tables: Table names to extract.
 
         Returns:
             Dict mapping table_name to 'success' or an error message.
         """
-        tables = self.discover_tables()
+        discovered = self.discover_tables()
         results: dict[str, str] = {}
 
-        for table_name, file_paths in tables.items():
+        for table_name in tables:
+            if table_name not in discovered:
+                msg = f"Table '{table_name}' not found in {self.config.source_volume_path}"
+                results[table_name] = msg
+                self.logger.failure(step="extract", message=msg)
+                continue
+
             try:
-                self.extract_table(table_name, file_paths)
+                self.extract_table(table_name, discovered[table_name])
                 results[table_name] = "success"
             except Exception as e:
                 results[table_name] = str(e)
                 self.logger.failure(
-                    step="extract_all",
+                    step="extract",
                     message=f"Failed to extract '{table_name}': {e}",
                 )
 
         succeeded = sum(1 for v in results.values() if v == "success")
         failed = len(results) - succeeded
         self.logger.log(
-            step="extract_all",
+            step="extract",
             status="success" if failed == 0 else "warning",
             message=(
                 f"Extraction complete: {succeeded} succeeded, {failed} failed "

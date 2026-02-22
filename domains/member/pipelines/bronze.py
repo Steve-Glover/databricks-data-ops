@@ -15,6 +15,14 @@ from data_ops import DatabricksLogger, VolumeExtractionConfig, VolumeExtractor
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Member bronze ingestion")
     parser.add_argument("--catalog", required=True, help="Unity Catalog name (dev, sit, prod)")
+    parser.add_argument(
+        "--table",
+        dest="tables",
+        action="append",
+        required=True,
+        metavar="TABLE",
+        help="Table name to extract (repeat for multiple tables)",
+    )
     return parser.parse_args(argv)
 
 
@@ -37,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     extractor = VolumeExtractor(config, spark=spark)
-    results = extractor.extract_all()
+    results = extractor.extract(args.tables)
 
     # Fail the job if any table extraction failed
     succeeded = [k for k, v in results.items() if v == "success"]
