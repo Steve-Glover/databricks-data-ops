@@ -34,3 +34,35 @@ resources:
 
       queue:
         enabled: true
+
+    member_silver_transform:
+      name: "[${bundle.target}] Member Silver Transform"
+      description: >
+        Reads from shared bronze tables, applies transformations,
+        and writes to silver Delta tables with developer prefix isolation.
+
+      tasks:
+        - task_key: silver_transform
+          environment_key: default
+          spark_python_task:
+            python_file: /Workspace/${workspace.root_path}/files/domains/member/pipelines/silver.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--table-prefix"
+              - "${workspace.current_user.userName}"
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ${var.library_path}
+
+      tags:
+        domain: member
+        layer: silver
+        pipeline: transform
+
+      queue:
+        enabled: true
