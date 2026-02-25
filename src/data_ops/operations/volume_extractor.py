@@ -58,8 +58,8 @@ class VolumeExtractionConfig(BaseModel, frozen=True):
         return f"{self.catalog}.{self.bronze_schema}.{table_name}"
 
 
-# Chunked files: "customers_202401_202403" -> table="customers"
-_CHUNKED_PATTERN = re.compile(r"^(.+?)_(\d{6})_(\d{6})$")
+# Chunked files: "customers_20240101_20240331" -> table="customers"
+_CHUNKED_PATTERN = re.compile(r"^(.+?)_(\d{8})_(\d{8})$")
 # Non-chunked files: filename IS the table name (no extension, no date suffix)
 _NON_CHUNKED_PATTERN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)$")
 

@@ -49,7 +49,7 @@ class TestVolumeExtractionConfig(unittest.TestCase):
 
     def test_valid_config_and_get_table_path(self):
         cfg = VolumeExtractionConfig(**BASE_CFG)
-        self.assertEqual(cfg.get_table_path("customers"), "dev.bronze.customers")
+        self.assertEqual(cfg.get_table_path("ess"), "dev.bronze.ess")
 
     def test_path_normalization(self):
         for path, expected_suffix in [("/Volumes/x", "/"), ("/Volumes/x/", "/")]:
@@ -77,8 +77,8 @@ class TestFilePatterns(unittest.TestCase):
 
     def test_chunked_pattern(self):
         cases = [
-            ("customers_202401_202403", "customers", "202401", "202403"),
-            ("order_items_202401_202403", "order_items", "202401", "202403"),
+            ("ess_20240101_20240331", "ess", "20240101", "20240331"),
+            ("dxcg_20240101_20240331", "dxcg", "20240101", "20240331"),
         ]
         for filename, expected_table, start, end in cases:
             with self.subTest(filename=filename):
@@ -89,18 +89,18 @@ class TestFilePatterns(unittest.TestCase):
                 self.assertEqual(m.group(3), end)
 
     def test_non_chunked_pattern(self):
-        for name, expected in [("customers", "customers"), ("order_items", "order_items")]:
+        for name, expected in [("ess", "ess"), ("dxcg", "dxcg")]:
             with self.subTest(name=name):
                 m = _NON_CHUNKED_PATTERN.match(name)
                 self.assertIsNotNone(m)
                 self.assertEqual(m.group(1), expected)
 
     def test_chunked_rejects_invalid_dates(self):
-        # 8-digit dates should not match chunked pattern
-        self.assertIsNone(_CHUNKED_PATTERN.match("customers_20240101_20240131"))
+        # 6-digit dates (old YYYYMM format) should not match
+        self.assertIsNone(_CHUNKED_PATTERN.match("ess_202401_202403"))
 
     def test_non_chunked_rejects_extensions(self):
-        for name in ["customers.meta", "README.md"]:
+        for name in ["ess.meta", "README.md"]:
             with self.subTest(name=name):
                 self.assertIsNone(_NON_CHUNKED_PATTERN.match(name))
 
@@ -112,14 +112,14 @@ class TestDiscoverTables(unittest.TestCase):
 
     def test_groups_chunked_files_and_skips_meta(self):
         self.ext.dbutils.fs.ls.return_value = [
-            SimpleNamespace(name="customers_202401_202403", path="p1"),
-            SimpleNamespace(name="customers_202404_202406", path="p2"),
-            SimpleNamespace(name="orders_202401_202403", path="p3"),
-            SimpleNamespace(name="customers.meta", path="ignored"),
+            SimpleNamespace(name="ess_20240101_20240331", path="p1"),
+            SimpleNamespace(name="ess_20240401_20240630", path="p2"),
+            SimpleNamespace(name="dxcg_20240101_20240331", path="p3"),
+            SimpleNamespace(name="ess.meta", path="ignored"),
         ]
         tables = self.ext.discover_tables()
-        self.assertEqual(len(tables["customers"]), 2)
-        self.assertEqual(len(tables["orders"]), 1)
+        self.assertEqual(len(tables["ess"]), 2)
+        self.assertEqual(len(tables["dxcg"]), 1)
 
     def test_groups_non_chunked_files(self):
         self.ext.dbutils.fs.ls.return_value = [
@@ -131,9 +131,9 @@ class TestDiscoverTables(unittest.TestCase):
 
     def test_mixed_chunked_and_non_chunked(self):
         self.ext.dbutils.fs.ls.return_value = [
-            SimpleNamespace(name="member_202401_202403", path="p1"),
-            SimpleNamespace(name="member_202404_202406", path="p2"),
-            SimpleNamespace(name="claims_202401_202403", path="p3"),
+            SimpleNamespace(name="member_20240101_20240331", path="p1"),
+            SimpleNamespace(name="member_20240401_20240630", path="p2"),
+            SimpleNamespace(name="claims_20240101_20240331", path="p3"),
             SimpleNamespace(name="eligibility", path="p4"),
             SimpleNamespace(name="member.meta", path="ignored"),
             SimpleNamespace(name="claims.meta", path="ignored"),
@@ -163,13 +163,13 @@ class TestReadMeta(unittest.TestCase):
         rows[1].__getitem__ = lambda s, k: {"test_name": "number_of_columns", "value": "15"}[k]
         self.ext.spark.read.parquet.return_value.collect.return_value = rows
 
-        meta = self.ext.read_meta("customers")
+        meta = self.ext.read_meta("ess")
         self.assertEqual(meta, {"number_of_rows": "1000", "number_of_columns": "15"})
 
     def test_missing_meta_raises(self):
         self.ext.spark.read.parquet.side_effect = Exception("not found")
         with self.assertRaises(FileNotFoundError):
-            self.ext.read_meta("customers")
+            self.ext.read_meta("ess")
 
 
 class TestValidation(unittest.TestCase):
@@ -206,17 +206,17 @@ class TestWriteToBronze(unittest.TestCase):
     def test_writes_delta_overwrite(self):
         ext = _make_extractor()
         df = MagicMock()
-        ext.write_to_bronze("customers", df)
+        ext.write_to_bronze("ess", df)
         df.write.format.assert_called_with("delta")
         df.write.format().mode.assert_called_with("overwrite")
-        df.write.format().mode().saveAsTable.assert_called_with("dev.bronze.customers")
+        df.write.format().mode().saveAsTable.assert_called_with("dev.bronze.ess")
 
     def test_failure_raises(self):
         ext = _make_extractor()
         df = MagicMock()
         df.write.format().mode().saveAsTable.side_effect = Exception("boom")
         with self.assertRaises(RuntimeError):
-            ext.write_to_bronze("customers", df)
+            ext.write_to_bronze("ess", df)
 
 
 class TestArchiveFiles(unittest.TestCase):
@@ -225,14 +225,14 @@ class TestArchiveFiles(unittest.TestCase):
     def test_renames_data_and_meta(self, mock_date):
         mock_date.today.return_value.strftime.return_value = "20260210"
         ext = _make_extractor()
-        paths = ["/Volumes/dev/bronze/external/mft/customers_202401_202403"]
+        paths = ["/Volumes/dev/bronze/external/mft/ess_20240101_20240331"]
 
-        ext.archive_files("customers", paths)
+        ext.archive_files("ess", paths)
 
         calls = [(c[0][0], c[0][1]) for c in ext.dbutils.fs.mv.call_args_list]
         expected = [
-            (paths[0], "/Volumes/dev/bronze/external/archive/customers_202401_202403_processed20260210"),
-            ("/Volumes/dev/bronze/external/mft/customers.meta", "/Volumes/dev/bronze/external/archive/customers_processed20260210.meta"),
+            (paths[0], "/Volumes/dev/bronze/external/archive/ess_20240101_20240331_processed20260210"),
+            ("/Volumes/dev/bronze/external/mft/ess.meta", "/Volumes/dev/bronze/external/archive/ess_processed20260210.meta"),
         ]
         for (src, dst) in expected:
             with self.subTest(src=src.rsplit("/", 1)[-1]):
@@ -244,7 +244,7 @@ class TestArchiveFiles(unittest.TestCase):
         ext = _make_extractor()
         ext.dbutils.fs.mv.side_effect = Exception("denied")
         with self.assertRaises(RuntimeError):
-            ext.archive_files("t", ["/Volumes/dev/bronze/external/mft/t_202401_202403"])
+            ext.archive_files("t", ["/Volumes/dev/bronze/external/mft/t_20240101_20240331"])
 
 
 class TestExtract(unittest.TestCase):
@@ -252,8 +252,8 @@ class TestExtract(unittest.TestCase):
     def setUp(self):
         self.ext = _make_extractor()
         self.ext.dbutils.fs.ls.return_value = [
-            SimpleNamespace(name="a_202401_202403", path="p1"),
-            SimpleNamespace(name="b_202401_202403", path="p2"),
+            SimpleNamespace(name="a_20240101_20240331", path="p1"),
+            SimpleNamespace(name="b_20240101_20240331", path="p2"),
         ]
 
     def test_continues_on_failure(self):
