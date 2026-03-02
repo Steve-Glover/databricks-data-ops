@@ -5,20 +5,21 @@ Discovers parquet file chunks in an external volume, validates against companion
 """
 
 import re
-from datetime import date
-
+from datetime import datetime, date
+# from datetime import date
 from pydantic import BaseModel, field_validator
+from pyspark.dbutils import DBUtils
 from pyspark.sql import DataFrame, SparkSession
-
 from data_ops.utils.errors import DataValidationError, ValidationResult
 from data_ops.utils.logging import DatabricksLogger
+from pyspark.sql import functions as F
 
 
 class VolumeExtractionConfig(BaseModel, frozen=True):
     """Configuration for volume extraction.
 
     Attributes:
-        catalog: Unity Catalog name (e.g., 'dev', 'sit', 'prod')
+        catalog: Unity Catalog name (e.g., 'dev_cda_ds', 'tst_cda_ds', 'cda_ds')
         source_volume_path: Path to the source volume with parquet chunks
         archive_volume_path: Path to the archive volume for processed files
         bronze_schema: Target schema name (default: 'bronze')
@@ -58,7 +59,7 @@ class VolumeExtractionConfig(BaseModel, frozen=True):
         return f"{self.catalog}.{self.bronze_schema}.{table_name}"
 
 
-# Chunked files: "customers_20240101_20240331" -> table="customers"
+# Chunked files: "claims_20240101_20240331" -> table="claims"
 _CHUNKED_PATTERN = re.compile(r"^(.+?)_(\d{8})_(\d{8})$")
 # Non-chunked files: filename IS the table name (no extension, no date suffix)
 _NON_CHUNKED_PATTERN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)$")
@@ -90,9 +91,6 @@ class VolumeExtractor:
             log_table_path=config.log_table_path,
             spark=self.spark,
         )
-
-        from pyspark.dbutils import DBUtils
-
         self.dbutils = DBUtils(self.spark)
 
     def discover_tables(self) -> dict[str, list[str]]:
@@ -228,68 +226,137 @@ class VolumeExtractor:
         results: list[ValidationResult] = []
 
         # 1. Row count check
-        expected_rows = int(meta["number_of_rows"])
-        actual_rows = df.count()
-        row_passed = actual_rows == expected_rows
-        results.append(
-            ValidationResult(
-                check_name="row_count",
-                expected=expected_rows,
-                actual=actual_rows,
-                passed=row_passed,
+        if "n_rows" in meta:
+            expected_rows = int(meta["n_rows"])
+            actual_rows = df.count()
+            row_passed = actual_rows == expected_rows
+            results.append(
+                ValidationResult(
+                    check_name="validate_row_count",
+                    expected=expected_rows,
+                    actual=actual_rows,
+                    passed=row_passed,
+                    message=f"Expected {expected_rows} rows, got {actual_rows}",
+                )
+            )
+            self.logger.log(
+                step="validate_row_count",
+                status="success" if row_passed else "failure",
                 message=f"Expected {expected_rows} rows, got {actual_rows}",
             )
-        )
-        self.logger.log(
-            step="validate_row_count",
-            status="success" if row_passed else "failure",
-            message=f"Expected {expected_rows} rows, got {actual_rows}",
-        )
 
-        # 2. Column count check
-        expected_cols = int(meta["number_of_columns"])
-        actual_cols = len(df.columns)
-        col_passed = actual_cols == expected_cols
-        results.append(
-            ValidationResult(
-                check_name="column_count",
-                expected=expected_cols,
-                actual=actual_cols,
-                passed=col_passed,
-                message=f"Expected {expected_cols} columns, got {actual_cols}",
+        # 2. n members check
+        if "n_mbrs" in meta:
+            expected_cols = int(meta["n_mbrs"])
+            actual_cols = len(df.columns)
+            col_passed = actual_cols == expected_cols
+            results.append(
+                ValidationResult(
+                    check_name="validate_n_members",
+                    expected=expected_cols,
+                    actual=actual_cols,
+                    passed=col_passed,
+                    message=f"Expected {expected_cols} columns, got {actual_cols}",
+                )
             )
-        )
-        self.logger.log(
-            step="validate_column_count",
-            status="success" if col_passed else "failure",
-            message=f"Expected {expected_cols} columns, got {actual_cols}",
-        )
+            self.logger.log(
+                step="validate_n_members",
+                status="success" if col_passed else "failure",
+                message=f"Expected {expected_cols} members, got {actual_cols}",
+            )
 
         # 3. Unique ID count check
-        id_column = meta["id_column"]
-        expected_unique = int(meta["number_of_unique_ids"])
-        actual_unique = df.select(id_column).distinct().count()
-        unique_passed = actual_unique == expected_unique
-        results.append(
-            ValidationResult(
-                check_name="unique_id_count",
-                expected=expected_unique,
-                actual=actual_unique,
-                passed=unique_passed,
+        if "n_unique_id" in meta:
+            id_column = meta["id_col"]
+            expected_unique = int(meta["n_unique_id"])
+            actual_unique = df.select(id_column).distinct().count()
+            unique_passed = actual_unique == expected_unique
+            results.append(
+                ValidationResult(
+                    check_name="validate_unique_id_count",
+                    expected=expected_unique,
+                    actual=actual_unique,
+                    passed=unique_passed,
+                    message=(
+                        f"Expected {expected_unique} unique values in '{id_column}', "
+                        f"got {actual_unique}"
+                    )
+                )
+            )
+            self.logger.log(
+                step="validate_unique_id_count",
+                status="success" if unique_passed else "failure",
                 message=(
                     f"Expected {expected_unique} unique values in '{id_column}', "
                     f"got {actual_unique}"
-                ),
+                )
             )
-        )
-        self.logger.log(
-            step="validate_unique_id_count",
-            status="success" if unique_passed else "failure",
-            message=(
-                f"Expected {expected_unique} unique values in '{id_column}', "
-                f"got {actual_unique}"
-            ),
-        )
+        # 4. Max Date
+        if "max_date" in meta and "date_col" in meta:
+            date_column = meta["date_col"]
+            expected_max = datetime.strptime(meta["max_date"], "%Y-%m-%d")
+            actual_max = df.select(date_column).agg(F.max(date_column)).collect()[0][0]
+            
+            # Convert actual_max to datetime for consistent comparison
+            if isinstance(actual_max, str):
+                actual_max = datetime.strptime(actual_max, "%Y-%m-%d")
+            elif isinstance(actual_max, date) and not isinstance(actual_max, datetime):
+                actual_max = datetime.combine(actual_max, datetime.min.time())
+            
+            max_passed = actual_max == expected_max
+            results.append(
+                ValidationResult(
+                    check_name="validate_max_date",
+                    expected=expected_max,
+                    actual=actual_max,
+                    passed=max_passed,
+                    message=(
+                        f"expected {expected_max} max date in '{date_column}', "
+                        f"got {actual_max}"
+                    )
+                )
+            )
+            self.logger.log(
+                step="validate_max_date",
+                status="success" if max_passed else "failure",
+                message=(
+                    f"expected {expected_max} max date in '{date_column}', "
+                    f"got {actual_max}"
+                )
+            )
+        # 5. Min Date
+        if "min_date" in meta and "date_col" in meta:
+            date_column = meta["date_col"]
+            expected_min = datetime.strptime(meta["min_date"], "%Y-%m-%d")
+            actual_min = df.select(date_column).agg(F.min(date_column)).collect()[0][0]
+            
+            # Convert actual_min to datetime for consistent comparison
+            if isinstance(actual_min, str):
+                actual_min = datetime.strptime(actual_min, "%Y-%m-%d")
+            elif isinstance(actual_min, date) and not isinstance(actual_min, datetime):
+                actual_min = datetime.combine(actual_min, datetime.min.time())
+            
+            min_passed = actual_min == expected_min
+            results.append(
+                ValidationResult(
+                    check_name="validate_min_date",
+                    expected=expected_min,
+                    actual=actual_min,
+                    passed=min_passed,
+                    message=(
+                        f"expected {expected_min} min date in '{date_column}', "
+                        f"got {actual_min}"
+                    )
+                )
+            )
+            self.logger.log(
+                step="validate_min_date",
+                status="success" if min_passed else "failure",
+                message=(
+                    f"expected {expected_min} min date in '{date_column}', "
+                    f"got {actual_min}"
+                )
+            )
 
         if all(r.passed for r in results):
             self.logger.success(
@@ -313,7 +380,7 @@ class VolumeExtractor:
         table_path = self.config.get_table_path(table_name)
 
         try:
-            df.write.format("delta").mode("overwrite").saveAsTable(table_path)
+            df.write.mode("overwrite").saveAsTable(table_path)
         except Exception as e:
             self.logger.failure(
                 step="write_to_bronze",
