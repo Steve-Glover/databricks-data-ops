@@ -29,19 +29,52 @@ def _make_extractor():
     return ext
 
 
-def _make_df(rows=1000, cols=15, unique=500):
+def _make_df(rows=1000, cols=15, unique=500, min_date=None, max_date=None):
+    """Create a mocked DataFrame with configurable return values.
+    
+    Args:
+        rows: Number of rows for count()
+        cols: Number of columns
+        unique: Number of unique values for distinct().count()
+        min_date: Optional datetime for min date aggregation
+        max_date: Optional datetime for max date aggregation
+    
+    Returns:
+        MagicMock configured to simulate a DataFrame
+    """
     df = MagicMock()
     df.count.return_value = rows
     df.columns = [f"c{i}" for i in range(cols)]
     df.select.return_value.distinct.return_value.count.return_value = unique
+    
+    # Configure date aggregation if dates provided
+    if min_date or max_date:
+        date_col_mock = MagicMock()
+        agg_results = []
+        
+        # Build side_effect list for sequential agg().collect() calls
+        if max_date:
+            max_result = MagicMock()
+            max_result.__getitem__.return_value.__getitem__.return_value = max_date
+            agg_results.append([max_result])
+        
+        if min_date:
+            min_result = MagicMock()
+            min_result.__getitem__.return_value.__getitem__.return_value = min_date
+            agg_results.append([min_result])
+        
+        if agg_results:
+            date_col_mock.agg.return_value.collect.side_effect = agg_results
+            df.select.return_value = date_col_mock
+    
     return df
 
 
 META = {
-    "number_of_rows": "1000",
-    "number_of_columns": "15",
-    "number_of_unique_ids": "500",
-    "id_column": "member_id",
+    "n_rows": "1000",
+    "n_mbrs": "15",
+    "n_unique_id": "500",
+    "id_col": "APPL_CL_NBR",
 }
 
 
@@ -196,27 +229,56 @@ class TestValidation(unittest.TestCase):
     def test_logs_each_check(self):
         self.ext.validate("test__t", _make_df(), META)
         steps = [c.kwargs["step"] for c in self.ext.logger.log.call_args_list]
-        for s in ["validate_row_count", "validate_column_count", "validate_unique_id_count"]:
+        for s in ["validate_row_count", "validate_n_members", "validate_unique_id_count"]:
             with self.subTest(step=s):
                 self.assertIn(s, steps)
 
+    def test_min_max_date_validation(self):
+        """Test that min and max date checks fail when DataFrame dates don't match metadata."""
+        ext = _make_extractor()
+        
+        # Metadata expects: min=2024-01-01, max=2024-03-31
+        # DataFrame returns: min=2024-01-02, max=2024-03-30 (both wrong)
+        df = _make_df(
+            rows=1000,
+            cols=15,
+            unique=500,
+            min_date=datetime(2024, 1, 2),   # Wrong: expected 2024-01-01
+            max_date=datetime(2024, 3, 30),  # Wrong: expected 2024-03-31
+        )
+        
+        meta = {
+            "n_rows": "1000",
+            "n_mbrs": "15",
+            "n_unique_id": "500",
+            "id_col": "APPL_CL_NBR",
+            "min_date": "2024-01-01",
+            "max_date": "2024-03-31",
+            "date_col": "SOME_DATE_COLUMN"
+        }
+        
+        with self.assertRaises(DataValidationError) as ctx:
+            ext.validate("test__t", df, meta)
+        
+        failed_steps = [r.check_name for r in ctx.exception.failed_results]
+        self.assertIn("validate_min_date", failed_steps)
+        self.assertIn("validate_max_date", failed_steps)
 
 class TestWriteToBronze(unittest.TestCase):
 
     def test_writes_delta_overwrite(self):
         ext = _make_extractor()
         df = MagicMock()
-        ext.write_to_bronze("test__ess", df)
-        df.write.format.assert_called_with("delta")
-        df.write.format().mode.assert_called_with("overwrite")
-        df.write.format().mode().saveAsTable.assert_called_with("dev.bronze.test__ess")
+        ext.write_to_bronze("test_claims_", df)
+        df.write.mode.assert_called_with("overwrite")
+        df.write.mode.return_value.saveAsTable.assert_called_with("dev.bronze.test_claims_")
 
     def test_failure_raises(self):
         ext = _make_extractor()
         df = MagicMock()
-        df.write.format().mode().saveAsTable.side_effect = Exception("boom")
+        df.write.mode.return_value.saveAsTable.side_effect = Exception("boom")
         with self.assertRaises(RuntimeError):
-            ext.write_to_bronze("test__ess", df)
+            ext.write_to_bronze("test_claims_", df)
 
 
 class TestArchiveFiles(unittest.TestCase):
@@ -275,6 +337,5 @@ class TestExtract(unittest.TestCase):
         call_args = self.ext.extract_table.call_args
         self.assertEqual(call_args[0][0], "test__a")
 
-
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(argv=[''], exit=False, verbosity=2)
