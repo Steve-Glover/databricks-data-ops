@@ -1,6 +1,7 @@
 """Unit tests for VolumeExtractionConfig and VolumeExtractor."""
 
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -263,6 +264,20 @@ class TestValidation(unittest.TestCase):
         failed_steps = [r.check_name for r in ctx.exception.failed_results]
         self.assertIn("validate_min_date", failed_steps)
         self.assertIn("validate_max_date", failed_steps)
+
+    def test_empty_meta_raises(self):
+        """Metadata with no recognized keys must not silently pass."""
+        with self.assertRaises(DataValidationError):
+            self.ext.validate("test__t", _make_df(), {"unknown_key": "42"})
+
+    def test_missing_id_col_fails_unique_check(self):
+        """n_unique_id without id_col should fail validation, not crash or skip."""
+        meta = {"n_rows": "1000", "n_mbrs": "15", "n_unique_id": "500"}
+        with self.assertRaises(DataValidationError) as ctx:
+            self.ext.validate("test__t", _make_df(), meta)
+        failed = [r.check_name for r in ctx.exception.failed_results]
+        self.assertIn("validate_unique_id_count", failed)
+
 
 class TestWriteToBronze(unittest.TestCase):
 
