@@ -16,19 +16,14 @@ This repository implements a comprehensive data operations framework using:
 databricks-data-ops/
 ├── src/
 │   ├── data_ops/              # Shared library (packaged as wheel)
-│   │   ├── operations/        # Common readers, writers, transformers
-│   │   ├── delta/             # Delta table management
-│   │   └── utils/             # Logging, errors, Spark helpers
-│   ├── domains/               # Domain-specific code (NOT in wheel)
-│   │   ├── member/            # Member domain
-│   │   └── claims/            # Claims domain
+│   │   ├── operations/        # Volume extraction, common operations
+│   │   ├── utils/             # Logging, errors, Spark helpers
+│   │   └── tests/             # Unit tests for the shared library
 │   └── config/                # Configuration management
+├── domains/                   # Domain-specific ETL pipelines (NOT in wheel)
+│   └── member/                # Member domain (pipelines, schemas, validations)
 ├── notebooks/                 # Databricks notebooks
-├── dlt/                       # Delta Live Tables pipelines
-├── resources/                 # DAB resource definitions
-├── tests/                     # Test suite
-├── configs/                   # Environment-specific configs
-├── scripts/                   # Utility scripts
+├── resources/                 # DAB job and pipeline YAML definitions
 └── docs/                      # Documentation
 ```
 
@@ -73,12 +68,8 @@ uv build
 ### 3. Run Tests
 
 ```bash
-# Run all tests
-pytest tests/
-
-# Run specific test suite
-pytest tests/unit/data_ops/
-pytest tests/unit/domains/member/
+# Run all unit tests
+uv run python -m unittest discover -s src/data_ops/tests -p 'test_*.py' -v
 ```
 
 ### 4. Linting and Formatting
@@ -105,8 +96,8 @@ databricks bundle validate
 # Deploy to dev environment
 databricks bundle deploy -t dev
 
-# Deploy to staging
-databricks bundle deploy -t staging
+# Deploy to SIT (staging)
+databricks bundle deploy -t sit
 
 # Deploy to production
 databricks bundle deploy -t prod
@@ -120,35 +111,33 @@ databricks bundle deploy -t prod
 
 ## Usage
 
-### In Notebooks
+### Volume Extraction
 
 ```python
-# Import data_ops library from deployed wheel
-from databricks_data_ops.operations import readers, writers
-from databricks_data_ops.delta import table_manager
-from databricks_data_ops.utils import logging
+from data_ops.operations.volume_extractor import VolumeExtractionConfig, VolumeExtractor
 
-# Read data
-df = readers.read_parquet("/data/raw/member")
-
-# Write to Delta
-writers.write_delta(df, "catalog.schema.table")
+config = VolumeExtractionConfig(
+    catalog="dev",
+    source_volume_path="/Volumes/dev/bronze/external/mft/",
+    archive_volume_path="/Volumes/dev/bronze/external/archive/",
+    log_table_path="dev.bronze.extraction_logs",
+)
+extractor = VolumeExtractor(config, spark)
+results = extractor.extract(["members", "claims"])
 ```
 
-### In DLT Pipelines
+### Logging
 
 ```python
-import dlt
-from databricks_data_ops.operations import readers, quality
+from data_ops.utils.logging import DatabricksLogger
 
-@dlt.table(name="member_bronze")
-def member_bronze():
-    return readers.read_parquet("/data/raw/member")
-
-@dlt.table(name="member_silver")
-@dlt.expect_all(quality.standard_expectations())
-def member_silver():
-    return dlt.read("member_bronze")
+logger = DatabricksLogger(
+    domain="member",
+    process="silver_transform",
+    log_table_path="dev.bronze.pipeline_logs",
+    spark=spark,
+)
+logger.success(step="transform", message="Completed transformation")
 ```
 
 ## Project Configuration
@@ -165,55 +154,33 @@ ENVIRONMENT=dev
 
 ### Catalog Configuration
 
-Each environment has its own catalog and schemas:
+Each environment uses a Unity Catalog with shared schemas:
 
-- **dev**: `dev_catalog.dev_member`, `dev_catalog.dev_claims`
-- **staging**: `staging_catalog.staging_member`, `staging_catalog.staging_claims`
-- **prod**: `prod_catalog.prod_member`, `prod_catalog.prod_claims`
+- **dev**: `dev.bronze`, `dev.silver`, `dev.gold`
+- **sit**: `sit.bronze`, `sit.silver`, `sit.gold`
+- **prod**: `prod.bronze`, `prod.silver`, `prod.gold`
 
 ## Development Workflow
 
 ### Adding a New Domain
 
-1. Create domain structure under `src/domains/your_domain/`
-2. Add pipelines (bronze.py, silver/, gold.py)
-3. Add validations and schemas
-4. Create DLT pipeline definitions in `dlt/your_domain/`
-5. Add job definitions in `resources/jobs/your_domain/`
-6. Update tests
-7. Update documentation
-
-### Adding New Silver Layer Scripts
-
-For domains with complex transformations:
-
-```
-src/domains/member/pipelines/silver/
-├── __init__.py
-├── demographics.py
-├── enrollment.py
-└── eligibility.py
-```
+1. Create domain structure under `domains/your_domain/` (pipelines, schemas, validations)
+2. Add job/pipeline YAML definitions in `resources/`
+3. Update tests
+4. Update documentation
 
 ## Testing
 
 ### Unit Tests
 
 ```bash
-# Test data_ops library
-pytest tests/unit/data_ops/
-
-# Test domain logic
-pytest tests/unit/domains/member/
-pytest tests/unit/domains/claims/
+# Run all unit tests
+uv run python -m unittest discover -s src/data_ops/tests -p 'test_*.py' -v
 ```
 
 ### Integration Tests
 
-```bash
-# End-to-end tests
-pytest tests/integration/
-```
+Integration tests run on Databricks via the VS Code Databricks extension (requires workspace credentials).
 
 ## Documentation
 
@@ -238,7 +205,7 @@ pytest tests/integration/
 - **Package Manager**: uv
 - **Platform**: Databricks Asset Bundles, Delta Live Tables
 - **Data**: Delta Lake, Apache Spark
-- **Testing**: pytest, pytest-spark, chispa
+- **Testing**: unittest, chispa
 - **Code Quality**: ruff, black, mypy
 - **Configuration**: Pydantic, PyYAML
 
