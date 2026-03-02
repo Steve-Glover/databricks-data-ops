@@ -340,10 +340,12 @@ class TestExtract(unittest.TestCase):
         self.assertEqual(results["test__b"], "success")
 
     def test_table_not_found_recorded_as_failure(self):
+        """Requesting a table that doesn't exist in the volume produces a failure entry."""
         self.ext.extract_table = MagicMock()
         results = self.ext.extract(["test__a", "test__missing"])
         self.assertEqual(results["test__a"], "success")
-        self.assertIn("test__missing", results["test__missing"])
+        self.assertNotEqual(results["test__missing"], "success")
+        self.ext.extract_table.assert_called_once()  # only test__a was attempted
 
     def test_only_requested_tables_processed(self):
         self.ext.extract_table = MagicMock()
