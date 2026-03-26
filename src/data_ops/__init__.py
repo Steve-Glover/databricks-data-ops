@@ -1,6 +1,6 @@
 """Common operations library for Databricks data pipelines."""
 
-from .operations import VolumeExtractionConfig, VolumeExtractor
+from .operations import BronzePipelineConfig, VolumeExtractionConfig, VolumeExtractor, run
 from .utils import (
     DatabricksLogger,
     DataValidationError,
@@ -11,6 +11,7 @@ from .utils import (
 )
 
 __all__ = [
+    "BronzePipelineConfig",
     "DatabricksLogger",
     "DataValidationError",
     "ValidationResult",
@@ -19,4 +20,5 @@ __all__ = [
     "create_logger",
     "prefixed_table_name",
     "resolve_table_prefix",
+    "run",
 ]
