@@ -1,11 +1,36 @@
 artifacts:
   data_ops:
     type: whl
-    build: uv build
-    path: ./dist/data_ops-*.whl
+    build: python -m build
+    path: .
 
 resources:
-  files:
-    data_ops_wheel:
-      source: dist/
-      path: /Volumes/${var.catalog}/gold/wheels/
+  jobs:
+    deploy_data_ops_wheel:
+      name: "[${bundle.target}] Deploy data_ops Wheel"
+      description: >
+        Copies the built data_ops wheel to the gold volumes
+        so it is available for team development and job dependencies.
+
+      tasks:
+        - task_key: copy_wheel_to_volume
+          environment_key: default
+          spark_python_task:
+            python_file: ${workspace.root_path}/files/domains/ops/deploy_wheel.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--wheel-path"
+              - "${artifacts.data_ops.files[0].remote_path}"
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - ${artifacts.data_ops.files[0].remote_path}
+
+      tags:
+        domain: ops
+        layer: gold
+        pipeline: deploy

@@ -10,7 +10,7 @@ resources:
         - task_key: bronze_extract
           environment_key: default
           spark_python_task:
-            python_file: /Workspace/${workspace.root_path}/files/domains/member/pipelines/bronze.py
+            python_file: ${workspace.root_path}/files/domains/member/pipelines/bronze.py
             parameters:
               - "--catalog"
               - "${var.catalog}"
@@ -45,7 +45,7 @@ resources:
         - task_key: silver_transform
           environment_key: default
           spark_python_task:
-            python_file: /Workspace/${workspace.root_path}/files/domains/member/pipelines/silver.py
+            python_file: ${workspace.root_path}/files/domains/member/pipelines/silver.py
             parameters:
               - "--catalog"
               - "${var.catalog}"

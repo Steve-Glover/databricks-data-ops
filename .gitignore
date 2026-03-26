@@ -10,3 +10,4 @@ CLAUDE.md
 .mypy_cache/
 .pytest_cache/
 .coverage
+dist/
