@@ -1,6 +1,7 @@
 """Unit tests for VolumeExtractionConfig and VolumeExtractor."""
 
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -264,6 +265,20 @@ class TestValidation(unittest.TestCase):
         self.assertIn("validate_min_date", failed_steps)
         self.assertIn("validate_max_date", failed_steps)
 
+    def test_empty_meta_raises(self):
+        """Metadata with no recognized keys must not silently pass."""
+        with self.assertRaises(DataValidationError):
+            self.ext.validate("test__t", _make_df(), {"unknown_key": "42"})
+
+    def test_missing_id_col_fails_unique_check(self):
+        """n_unique_id without id_col should fail validation, not crash or skip."""
+        meta = {"n_rows": "1000", "n_mbrs": "15", "n_unique_id": "500"}
+        with self.assertRaises(DataValidationError) as ctx:
+            self.ext.validate("test__t", _make_df(), meta)
+        failed = [r.check_name for r in ctx.exception.failed_results]
+        self.assertIn("validate_unique_id_count", failed)
+
+
 class TestWriteToBronze(unittest.TestCase):
 
     def test_writes_delta_overwrite(self):
@@ -325,10 +340,12 @@ class TestExtract(unittest.TestCase):
         self.assertEqual(results["test__b"], "success")
 
     def test_table_not_found_recorded_as_failure(self):
+        """Requesting a table that doesn't exist in the volume produces a failure entry."""
         self.ext.extract_table = MagicMock()
         results = self.ext.extract(["test__a", "test__missing"])
         self.assertEqual(results["test__a"], "success")
-        self.assertIn("test__missing", results["test__missing"])
+        self.assertNotEqual(results["test__missing"], "success")
+        self.ext.extract_table.assert_called_once()  # only test__a was attempted
 
     def test_only_requested_tables_processed(self):
         self.ext.extract_table = MagicMock()

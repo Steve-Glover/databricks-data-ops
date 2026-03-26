@@ -267,30 +267,46 @@ class VolumeExtractor:
 
         # 3. Unique ID count check
         if "n_unique_id" in meta:
-            id_column = meta["id_col"]
-            expected_unique = int(meta["n_unique_id"])
-            actual_unique = df.select(id_column).distinct().count()
-            unique_passed = actual_unique == expected_unique
-            results.append(
-                ValidationResult(
-                    check_name="validate_unique_id_count",
-                    expected=expected_unique,
-                    actual=actual_unique,
-                    passed=unique_passed,
+            if "id_col" not in meta:
+                results.append(
+                    ValidationResult(
+                        check_name="validate_unique_id_count",
+                        expected="id_col in metadata",
+                        actual="id_col missing",
+                        passed=False,
+                        message="Metadata contains 'n_unique_id' but missing required 'id_col'",
+                    )
+                )
+                self.logger.log(
+                    step="validate_unique_id_count",
+                    status="failure",
+                    message="Metadata contains 'n_unique_id' but missing required 'id_col'",
+                )
+            else:
+                id_column = meta["id_col"]
+                expected_unique = int(meta["n_unique_id"])
+                actual_unique = df.select(id_column).distinct().count()
+                unique_passed = actual_unique == expected_unique
+                results.append(
+                    ValidationResult(
+                        check_name="validate_unique_id_count",
+                        expected=expected_unique,
+                        actual=actual_unique,
+                        passed=unique_passed,
+                        message=(
+                            f"Expected {expected_unique} unique values in '{id_column}', "
+                            f"got {actual_unique}"
+                        )
+                    )
+                )
+                self.logger.log(
+                    step="validate_unique_id_count",
+                    status="success" if unique_passed else "failure",
                     message=(
                         f"Expected {expected_unique} unique values in '{id_column}', "
                         f"got {actual_unique}"
                     )
                 )
-            )
-            self.logger.log(
-                step="validate_unique_id_count",
-                status="success" if unique_passed else "failure",
-                message=(
-                    f"Expected {expected_unique} unique values in '{id_column}', "
-                    f"got {actual_unique}"
-                )
-            )
         # 4. Max Date
         if "max_date" in meta and "date_col" in meta:
             date_column = meta["date_col"]
@@ -357,6 +373,13 @@ class VolumeExtractor:
                     f"got {actual_min}"
                 )
             )
+
+        if not results:
+            self.logger.failure(
+                step="validate",
+                message=f"No validation checks matched metadata keys for '{table_name}'",
+            )
+            raise DataValidationError(table_name, results)
 
         if all(r.passed for r in results):
             self.logger.success(
