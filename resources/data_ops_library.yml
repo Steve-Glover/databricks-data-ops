@@ -1,16 +1,10 @@
-artifacts:
-  data_ops:
-    type: whl
-    build: python -m build
-    path: .
-
 resources:
   jobs:
     deploy_data_ops_wheel:
       name: "[${bundle.target}] Deploy data_ops Wheel"
       description: >
-        Copies the built data_ops wheel to the gold volumes
-        so it is available for team development and job dependencies.
+        Builds and tests the data_ops wheel locally, then copies it to the gold
+        volumes so it is available for team development and job dependencies.
 
       tasks:
         - task_key: copy_wheel_to_volume
@@ -21,14 +15,12 @@ resources:
               - "--catalog"
               - "${var.catalog}"
               - "--wheel-path"
-              - "${artifacts.data_ops.files[0].remote_path}"
+              - "${workspace.root_path}/artifacts/.internal/data_ops-0.1.0-py3-none-any.whl"
 
       environments:
         - environment_key: default
           spec:
-            client: "1"
-            dependencies:
-              - ${artifacts.data_ops.files[0].remote_path}
+            client: "2"
 
       tags:
         domain: ops

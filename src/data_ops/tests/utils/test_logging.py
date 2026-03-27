@@ -324,7 +324,10 @@ class TestDatabricksLoggerIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.spark = SparkSession.builder.getOrCreate()
+        try:
+            cls.spark = SparkSession.builder.getOrCreate()
+        except RuntimeError:
+            raise unittest.SkipTest("Requires active Databricks connection")
         cls.test_table_path = "dev.bronze.test_logging"
 
     @classmethod
